@@ -1,0 +1,1834 @@
+------CORONA Report ----
+--orders
+DROP TABLE IF EXISTS trash.is_de_at_orders;
+CREATE TABLE trash.is_de_at_orders
+    DISTKEY (scooberjobid)
+    SORTKEY (driverid, orderdatetime)
+AS (
+    SELECT o.scooberjobid,
+           o.driverid,
+           o.restaurantid,
+           o.countryid,
+           s.scooberjobregion                  as city,
+           o.scooberpooljobid,
+           CASE
+               WHEN dimo."pre-orderflag" = 'Pre-order'
+                   THEN NULL
+               ELSE o.orderdatetime
+               END                             AS orderdatetime,
+           o.scooberjobcreateddatetime,
+           o.scooberjobaccepteddatetime,
+           o.scooberjobscheduledpickupdatetime,
+           o.scooberjobpickuparrivaldatetime,
+           o.scooberjobfetcheddatetime,
+           o.scooberjobarrivaldatetime,
+           o.scooberjobdelivereddatetime,
+           o.scooberjobdelivereddatetime::DATE AS datedelivered,
+           o.scooberdistance,
+           o.scooberdispatchmentdistance,
+           achievedsla1,
+           achievedsla2,
+           achievedsla3,
+           achievedsla4,
+           ROUND(DATEDIFF('second', o.scooberjobaccepteddatetime,
+                          o.scooberjobpickuparrivaldatetime) / 60.0,
+                 2)                            AS a2p_deliverytime,
+           ROUND(DATEDIFF('second', o.scooberjobpickuparrivaldatetime,
+                          o.scooberjobfetcheddatetime) / 60.0,
+                 2)                            AS p2f_deliverytime,
+           ROUND(DATEDIFF('second', o.scooberjobaccepteddatetime,
+                          o.scooberjobfetcheddatetime) / 60.0,
+                 2)                            AS a2f_deliverytime,
+           ROUND(DATEDIFF('second', o.scooberjobfetcheddatetime,
+                          o.scooberjobdelivereddatetime) / 60.0,
+                 2)                            AS f2d_deliverytime,
+           ROUND(DATEDIFF('second', CASE
+                                        WHEN dimo."pre-orderflag" = 'Pre-order'
+                                            THEN NULL
+                                        ELSE o.orderdatetime
+               END,
+                          o.scooberjobdelivereddatetime) / 60.0,
+                 2)                            AS o2d_deliverytime--,
+           --AVG(a2f_deliverytime)
+           --OVER (PARTITION BY o.restaurantid, DATE_PART(y, o.scooberjobdelivereddatetime)) AS a2f_deliverytime_average_for_vendor,
+           --z1.zipcode                                                                      AS restaurantzipcode,
+           --z2.zipcode                                                                      AS customerzipcodeid
+    FROM (
+             SELECT scooberjobid,
+                    driverid,
+                    restaurantid,
+                    countryid,
+                    scooberjobregionid,
+                    scooberpooljobid,
+                    orderdatetime,
+                    scooberjobcreateddatetime,
+                    scooberjobaccepteddatetime,
+                    scooberjobscheduledpickupdatetime,
+                    scooberjobpickuparrivaldatetime,
+                    scooberjobfetcheddatetime,
+                    scooberjobarrivaldatetime,
+                    scooberjobdelivereddatetime,
+                    scooberdistance,
+                    scooberdispatchmentdistance,
+                    achievedsla1,
+                    achievedsla2,
+                    achievedsla3,
+                    achievedsla4
+             FROM dwh.fact_scooberjob
+             UNION
+             SELECT jobid                     AS scooberjobid,
+                    driverid,
+                    restaurantid,
+                    countryid,
+                    scoober_job_region_id     AS scooberjobregionid,
+                    scooberpooljobid,
+                    scooberjobcreateddatetime AS orderdatetime,
+                    scooberjobcreateddatetime,
+                    scooberjobaccepteddatetime,
+                    scooberjobscheduledpickupdatetime,
+                    scooberjobpickuparrivaldatetime,
+                    scooberjobfetcheddatetime,
+                    scooberjobarrivaldatetime,
+                    scooberjobdelivereddatetime,
+                    scooberjobdistance        AS scooberdistance,
+                    NULL                      AS scooberdispatchmentdistance,
+                    achievedsla1 = 1          AS achievedsla1,
+                    achievedsla2 = 1          AS achievedsla2,
+                    achievedsla3 = 1          AS achievedsla3,
+                    achievedsla4 = 1          AS achievedsla4
+             FROM dwh.fact_nonmatchingscooberjob
+         ) AS o
+             LEFT JOIN dwh.dim_scooberjobregion s
+                       ON s.scooberjobregionid = o.scooberjobregionid
+             LEFT JOIN dwh.fact_scooberjobid_orderid_mapping m
+                       ON m.scooberjobid = o.scooberjobid
+             LEFT JOIN dwh.dim_order dimo
+                       ON dimo.orderid = m.orderid
+         --LEFT JOIN dwh.fact_order fo
+         --          ON fo.orderid = m.orderid
+         --LEFT JOIN dwh.dim_zipcode z1
+         --          ON fo.restaurantzipcodeid = z1.zipcodeid
+         --LEFT JOIN dwh.dim_zipcode z2
+         --          ON fo.customerzipcodeid = z2.zipcodeid
+    WHERE o.countryid IN (2, -20001, 5)
+      AND (dimo.country IN ('DE', 'DEL', 'AT') OR dimo.country IS NULL)
+      --AND (fo.countryid IN (2,-20001,5) OR fo.countryid IS NULL)
+      AND o.scooberjobdelivereddatetime::DATE >= '2019-04-01'
+      AND (dimo.orderday::DATE >= '2019-04-01' OR dimo.orderday IS NULL)
+    --AND (fo.orderdatetime::DATE >= '2020-08-01' OR fo.orderdatetime IS NULL)
+);
+GRANT SELECT ON trash.is_de_at_orders TO PUBLIC;
+
+--vacations
+DROP TABLE IF EXISTS trash.is_de_at_vacations;
+CREATE TABLE trash.is_de_at_vacations
+    DISTKEY (vacation_id)
+    SORTKEY (driver_id, day)
+AS (
+    SELECT v._id                                            AS vacation_id,
+           SPLIT_PART(SUBSTRING(v.user, 7, 7), '}', 1)::INT AS driver_id,
+           da.date                                          AS day,
+           v.status                                         AS status,
+           v.reason                                         AS reason
+    FROM mylorry.vacations v
+             LEFT JOIN dwh.dim_date da
+                       ON da.date BETWEEN v.fromdate AND v.todate
+             LEFT JOIN dwh.dim_driver d
+                       ON d.driverid = SPLIT_PART(SUBSTRING(v.user, 7, 7), '}', 1)::INT
+    WHERE d.country IN ('DE', 'DEL', 'AT')
+);
+
+--shifts
+DROP TABLE IF EXISTS trash.is_de_at_shifts;
+CREATE TABLE trash.is_de_at_shifts
+    DISTKEY (shift_id)
+    SORTKEY (driver_id, planned_start)
+AS (
+    SELECT ws.shiftid                                                        AS shift_id,
+           ws.driverid                                                       AS driver_id,
+           s.scooberjobregion                                                AS city,
+           ws.shiftdate::DATE                                                AS shift_date,
+           ws.startdatetime                                                  AS planned_start,
+           ws.enddatetime                                                    AS planned_end,
+           ws.absence = 1                                                    AS absence_flag,
+           ws.paidshift = 1                                                  AS paid_flag,
+           v.reason                                                          AS approved_absence_reason,
+           vt.vehicletype                                                    AS vehicletype,
+           MIN(l.login_date_time)                                            AS first_login,
+           MAX(l.logout_date_time)                                           AS last_logout,
+           CASE
+               WHEN planned_start > first_login THEN planned_start
+               ELSE first_login END                                          AS first_login_within_shift,
+           CASE
+               WHEN planned_end < last_logout THEN planned_end
+               ELSE last_logout END                                          AS last_logout_within_shift,
+           MIN(o.scooberjobaccepteddatetime)                                 AS first_order_accepted_up_to_15min_before_shift,
+           MAX(o.scooberjobdelivereddatetime)                                AS last_order_delivered,
+           GREATEST(last_order_delivered, last_logout_within_shift)          AS working_end,
+           --working_start will be changed to working_end of shift before if overlapping
+           GREATEST(LEAST(first_order_accepted_up_to_15min_before_shift, first_login_within_shift),
+                    LAG(working_end)
+                    OVER ( PARTITION BY ws.driverid, shiftdate::DATE
+                        ORDER BY working_end))                               AS working_start,
+           ROUND(DATEDIFF('second', planned_start, planned_end) / 3600.0, 2) AS planned_hours,
+           ROUND(DATEDIFF('second', first_login_within_shift, last_logout_within_shift
+                     ) / 3600.0,
+                 2)                                                          AS first_login_till_last_logout_within_shift_hours,
+           ROUND(SUM(DISTINCT DATEDIFF('second',
+                                       CASE
+                                           WHEN startdatetime > login_date_time
+                                               THEN startdatetime
+                                           ELSE login_date_time END,
+                                       CASE
+                                           WHEN enddatetime < logout_date_time
+                                               THEN enddatetime
+                                           ELSE logout_date_time END
+               )) / 3600.0, 2)                                               AS logged_in_within_shift_hours,
+           ROUND(DATEDIFF('second', working_start, working_end) / 3600.0, 2) AS worked_hours,
+           ROUND(DATEDIFF('second', LAG(planned_end)
+                                    OVER ( PARTITION BY ws.driverid, shift_date
+                                        ORDER BY planned_end),
+                          planned_start) / 3600.0, 2)                        AS breaktime_before_shift_planned,
+           ROUND(DATEDIFF('second', LAG(working_end)
+                                    OVER ( PARTITION BY ws.driverid, shift_date
+                                        ORDER BY working_end),
+                          working_start) / 3600.0, 2)                        AS breaktime_before_shift_actual,
+           absence_flag AND paid_flag                                        AS paid_no_show,
+           absence_flag AND NOT paid_flag AND v.reason IS NOT NULL           AS unpaid_no_show_excused,
+           absence_flag AND NOT paid_flag AND v.reason IS NULL               AS unpaid_no_show_unexcused
+    FROM dwh.fact_workingshifts ws
+             LEFT JOIN trash.is_de_at_orders o
+                       ON o.driverid = ws.driverid
+                           AND
+                          o.scooberjobaccepteddatetime BETWEEN DATEADD(minute, -15, startdatetime) AND enddatetime
+             LEFT JOIN dwh.fact_scooberdriverloginslogouts l
+                       ON l.driver_id = ws.driverid
+                           AND startdatetime < logout_date_time
+                           AND login_date_time < enddatetime
+             LEFT JOIN dwh.dim_scooberjobregion s
+                       ON s.scooberjobregionid = ws.scooberjobregionid
+             LEFT JOIN trash.is_de_at_vacations v
+                       ON ws.shiftdate = v.day AND ws.driverid = v.driver_id AND v.status = 'approved'
+             LEFT JOIN dwh.dim_scooberdeliveryvehicletype vt
+                       ON vt.vehicletypeid = ws.lorrytypeid
+    WHERE ws.countryid IN (2, -20001, 5)
+    GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+);
+GRANT SELECT ON trash.is_de_at_shifts TO PUBLIC;
+
+--drivers
+DROP TABLE IF EXISTS trash.is_de_at_drivers;
+CREATE TABLE trash.is_de_at_drivers
+    DISTKEY (driver_id)
+    SORTKEY (driver_id)
+AS (
+    --drivers with first shift date / last shift date. No shift planned = not in list
+    SELECT d.driverid                                                      AS driver_id,
+           s.scooberjobregion                                              AS city,
+           d.contracttype                                                  AS contracttype,
+           d.minworkinghoursperweek                                        AS minworkinghoursperweek,
+           d.minworkinghourspermonth                                       AS minworkinghourspermonth,
+           d.contractworkinghourspermonth                                  AS contractworkinghourspermonth,
+           d.status = 'activated'
+               AND d.contracttype IS NOT NULL
+               AND d.contractstatus = 'Won'                                AS contracted_today,
+           MIN(ws.shiftdate::DATE)                                         AS first_shift,
+           --last shift = NULL if still contracted
+           CASE WHEN NOT contracted_today THEN MAX(ws.shiftdate::DATE) END AS last_shift
+    FROM dwh.dim_driver d
+             LEFT JOIN dwh.fact_workingshifts ws ON ws.driverid = d.driverid AND ws.successshift = 1
+             LEFT JOIN dwh.dim_scooberjobregion s ON d.city = LOWER(s.scooberjobregion)
+    WHERE d.country IN ('DE', 'DEL', 'AT')
+    GROUP BY 1, 2, 3, 4, 5, 6, 7
+    order by 1
+);
+
+--demand
+DROP TABLE IF EXISTS trash.is_de_demand_data;
+CREATE TABLE trash.is_de_demand_data
+    DISTSTYLE EVEN
+    SORTKEY (city, date)
+AS
+WITH demand_30min_level AS (
+    SELECT d.scooberjobregionid,
+           d.start_date_time,
+           NVL(nr_driver_demand / 2.0, 0)                AS demand_hours_30,
+
+           NVL(ROUND(SUM(CASE
+                             WHEN w.startdatetime IS NULL THEN 0
+                             ELSE DATEDIFF('second',
+                                           GREATEST(w.startdatetime, d.start_date_time),
+                                           LEAST(w.enddatetime, d.end_date_time)
+                                 ) END) / 3600.0, 2), 0) AS planned_hours_30
+    FROM dwh.fact_scoober_driver_demand d
+             LEFT JOIN dwh.fact_workingshifts w ON d.scooberjobregionid = w.scooberjobregionid
+        AND w.startdatetime < d.end_date_time
+        AND w.enddatetime > d.start_date_time
+    WHERE d.countryid IN (2, -20001, 5)
+          --and d.scooberjobregionid = 97 and d.start_date_time::date = '2021-04-28'
+    GROUP BY 1, 2, 3
+)
+SELECT s.scooberjobregion                                   AS city,
+       d30.start_date_time::DATE                            AS date,
+       SUM(demand_hours_30)                                 AS demand_hours,
+       SUM(LEAST(demand_hours_30, planned_hours_30))        AS demand_fulfilisent_hours,
+       SUM(GREATEST(planned_hours_30 - demand_hours_30, 0)) AS overstaffed_hours
+FROM demand_30min_level d30
+         LEFT JOIN dwh.dim_scooberjobregion s
+                   ON d30.scooberjobregionid = s.scooberjobregionid
+GROUP BY 1, 2
+ORDER BY 1, 2;
+
+--city
+DROP TABLE IF EXISTS trash.is_de_at_city;
+CREATE TABLE trash.is_de_at_city
+    DISTKEY (city)
+    SORTKEY (city, date)
+AS (
+    WITH orders AS (
+        SELECT city                                              AS city,
+               datedelivered                                     AS day,
+               COUNT(*)                                          AS orders,
+               COUNT(CASE WHEN scooberpooljobid > -1 THEN 1 END) AS pooljoborders,
+               AVG(o2d_deliverytime)                             AS o2d_deliverytime,
+               AVG(f2d_deliverytime)                             AS f2d_deliverytime,
+               AVG(scooberdispatchmentdistance)                  AS total_dist_m,
+               AVG(scooberdistance)                              AS delivery_dist_m,
+               COUNT(CASE WHEN achievedsla1 THEN 1 END)          AS achieved_sla1,
+               COUNT(CASE WHEN achievedsla2 THEN 1 END)          AS achieved_sla2,
+               COUNT(CASE WHEN achievedsla3 THEN 1 END)          AS achieved_sla3,
+               COUNT(CASE WHEN achievedsla4 THEN 1 END)          AS achieved_sla4,
+               COUNT(CASE WHEN NOT achievedsla1 THEN 1 END)      AS not_achieved_sla1,
+               COUNT(CASE WHEN NOT achievedsla2 THEN 1 END)      AS not_achieved_sla2,
+               COUNT(CASE WHEN NOT achievedsla3 THEN 1 END)      AS not_achieved_sla3,
+               COUNT(CASE WHEN NOT achievedsla4 THEN 1 END)      AS not_achieved_sla4
+        FROM trash.is_de_at_orders
+        GROUP BY 1, 2
+    ),
+         canceled_orders AS (
+             SELECT sjr.scooberjobregion            AS city,
+                    scooberjobupdateddatetime::date AS day,
+                    COUNT(*)                        AS canceled_orders
+             FROM dwh.fact_scooberjob_cancelled sjc
+                      LEFT JOIN dwh.dim_scooberjobregion sjr on sjc.scooberjobregionid = sjr.scooberjobregionid
+             GROUP BY 1, 2
+         ),
+         online_restaurants AS (
+             SELECT c.scooberjobregion                                                      AS city,
+                    date                                                                    AS day,
+                    COUNT(DISTINCT CASE
+                                       WHEN restaurantonlinestatus = 'Online (with Menu)'
+                                           THEN ros.restaurantid END)                       AS online_restaurants,
+                    COUNT(DISTINCT CASE
+                                       WHEN restaurantonlinestatus = 'Online (temporarily closed)'
+                                           THEN ros.restaurantid END)                       AS temp_off_restaurants,
+                    NVL(SUM(CASE
+                                WHEN restaurantonlinestatus = 'Online (with Menu)' AND ee.event_type_id % 2 = 1
+                                    THEN ee.eventduration / 60.0 END),
+                        0)                                                                  AS online_restaurants_closed_hours,
+                    NVL(online_restaurants_closed_hours / NULLIF(online_restaurants, 0), 0) AS city_closed_hours
+             FROM dwh.fact_restaurantonlinestatus ros
+                      LEFT JOIN dwh.fact_scoober_emergencyevent ee
+                                ON ee.eventdate::DATE = ros.date AND ee.restaurantid = ros.restaurantid
+                      LEFT JOIN dwh.dim_restaurant r
+                                ON r.restaurantid = ros.restaurantid
+                      LEFT JOIN dwh.dim_city c
+                                ON c.city = r.city
+             WHERE scooberrestaurant = 'Scoober'
+               AND r.country IN ('DE', 'DEL', 'AT')
+             GROUP BY 1, 2
+         ),
+         active_restaurants_daily AS (
+             SELECT o.city                         AS city,
+                    o.orderdatetime::DATE          AS day,
+                    COUNT(DISTINCT o.restaurantid) AS active_restaurants
+             FROM trash.is_de_at_orders AS o
+                      LEFT JOIN dwh.dim_restaurant r
+                                ON r.restaurantid = o.restaurantid
+             WHERE scooberrestaurant = 'Scoober'
+             GROUP BY 1, 2
+         ),
+         active_restaurants_weekly AS (
+             SELECT o.city                         AS city,
+                    DATE_PART(y, o.orderdatetime)  AS year,
+                    DATE_PART(w, o.orderdatetime)  AS week,
+                    COUNT(DISTINCT o.restaurantid) AS active_restaurants
+             FROM trash.is_de_at_orders AS o
+                      LEFT JOIN dwh.dim_restaurant r
+                                ON r.restaurantid = o.restaurantid
+             WHERE scooberrestaurant = 'Scoober'
+             GROUP BY 1, 2, 3
+         ),
+         active_restaurants_monthly AS (
+             SELECT o.city                            AS city,
+                    DATE_PART(y, o.orderdatetime)     AS year,
+                    DATE_PART(month, o.orderdatetime) AS month,
+                    COUNT(DISTINCT o.restaurantid)    AS active_restaurants
+             FROM trash.is_de_at_orders AS o
+                      LEFT JOIN dwh.dim_restaurant r
+                                ON r.restaurantid = o.restaurantid
+             WHERE scooberrestaurant = 'Scoober'
+             GROUP BY 1, 2, 3
+         ),
+         contracted_drivers_daily AS (
+             SELECT d.city                                                                   AS city,
+                    date.date                                                                AS day,
+                    COUNT(DISTINCT d.driver_id)                                              AS contracted_drivers,
+                    COUNT(DISTINCT CASE WHEN d.first_shift = date.date THEN d.driver_id END) AS new_drivers,
+                    COUNT(DISTINCT CASE
+                                       WHEN (d.last_shift = date.date AND NOT d.contracted_today)
+                                           THEN d.driver_id END)                             AS churned_drivers,
+                    SUM(DISTINCT CASE
+                                     WHEN (d.last_shift = date.date AND NOT d.contracted_today)
+                                         THEN DATE_DIFF('day', d.first_shift, d.last_shift) END) /
+                    30.0                                                                     AS total_active_months_churned_drivers
+             FROM trash.is_de_at_drivers d
+                      LEFT JOIN dwh.dim_date date
+                                ON date.date BETWEEN d.first_shift AND NVL(d.last_shift, GETDATE()::DATE)
+             GROUP BY 1, 2
+         ),
+        /*
+        contracted_drivers_weekly AS (
+            SELECT d.city                                                                       AS city,
+                   date.year                                                                    AS year,
+                   date.weeknumber                                                              AS week,
+                   COUNT(DISTINCT d.driver_id)                                                  AS contracted_drivers,
+                   COUNT(DISTINCT CASE WHEN d.first_shift = date.date THEN d.driver_id END)     AS new_drivers,
+                   COUNT(DISTINCT CASE
+                                      WHEN (d.last_shift = date.date AND NOT d.contracted_today)
+                                          THEN d.driver_id END)                                 AS churned_drivers,
+                   SUM(DISTINCT CASE
+                                    WHEN (d.last_shift = date.date AND NOT d.contracted_today)
+                                        THEN DATE_DIFF(month, d.first_shift, d.last_shift) END) AS total_active_months_churned_drivers
+            FROM trash.is_de_at_drivers d
+                     LEFT JOIN dwh.dim_date date
+                               ON date.date BETWEEN d.first_shift AND NVL(d.last_shift, GETDATE()::DATE)
+            GROUP BY 1, 2, 3
+        ),
+        contracted_drivers_monthly AS (
+            SELECT d.city                                                                         AS city,
+                   date.year                                                                      AS year,
+                   date.monthnumber                                                               AS month,
+                   COUNT(DISTINCT d.driver_id)                                                    AS contracted_drivers,
+                   COUNT(DISTINCT CASE WHEN d.first_shift = date.date THEN d.driver_id END)       AS new_drivers,
+                   COUNT(DISTINCT CASE
+                                      WHEN (d.last_shift = date.date AND NOT d.contracted_today)
+                                          THEN d.driver_id END)                                   AS churned_drivers,
+                   SUM(DISTINCT CASE
+                                    WHEN (d.last_shift = date.date AND NOT d.contracted_today)
+                                        THEN DATE_DIFF('month', d.first_shift, d.last_shift) END) AS total_active_months_churned_drivers
+            FROM trash.is_de_at_drivers d
+                     LEFT JOIN dwh.dim_date date
+                               ON date.date BETWEEN d.first_shift AND NVL(d.last_shift, GETDATE()::DATE)
+            GROUP BY 1, 2, 3
+        ),*/
+         active_drivers_daily AS (
+             SELECT s.scooberjobregion       AS city,
+                    shiftdate::DATE          AS day,
+                    COUNT(DISTINCT driverid) AS active_drivers
+             FROM dwh.fact_workingshifts ws
+                      LEFT JOIN dwh.dim_scooberjobregion s
+                                ON ws.scooberjobregionid = s.scooberjobregionid
+             WHERE countryid IN (2, -20001, 5)
+               AND successshift = 1
+             GROUP BY 1, 2
+         ),
+         active_drivers_weekly AS (
+             SELECT s.scooberjobregion       AS city,
+                    DATE_PART(y, shiftdate)  AS year,
+                    DATE_PART(w, shiftdate)  AS week,
+                    COUNT(DISTINCT driverid) AS active_drivers
+             FROM dwh.fact_workingshifts ws
+                      LEFT JOIN dwh.dim_scooberjobregion s
+                                ON ws.scooberjobregionid = s.scooberjobregionid
+             WHERE countryid IN (2, -20001, 5)
+               AND successshift = 1
+             GROUP BY 1, 2, 3
+         ),
+         active_drivers_monthly AS (
+             SELECT s.scooberjobregion          AS city,
+                    DATE_PART(y, shiftdate)     AS year,
+                    DATE_PART(month, shiftdate) AS month,
+                    COUNT(DISTINCT driverid)    AS active_drivers
+             FROM dwh.fact_workingshifts ws
+                      LEFT JOIN dwh.dim_scooberjobregion s
+                                ON ws.scooberjobregionid = s.scooberjobregionid
+             WHERE countryid IN (2, -20001, 5)
+               AND successshift = 1
+             GROUP BY 1, 2, 3
+         ),
+         availabilities AS (
+             SELECT s.scooberjobregion               AS city,
+                    av.availability_date             AS day,
+                    SUM(LEAST(DATEDIFF(s, GREATEST(av.available_from_datetime,
+                                                   DATEADD(d, DATEDIFF(d, '2000-01-01', av.available_from_datetime),
+                                                           '2000-01-01 11:30:00.000000')),
+                                       LEAST(av.available_till_datetime,
+                                             DATEADD(d, DATEDIFF(d, '2000-01-01', av.available_till_datetime),
+                                                     '2000-01-01 23:00:00.000000'))
+                                  ) / 3600.0, 10.0)) AS available_hours
+             FROM dwh.fact_driver_availability av
+                      LEFT JOIN dwh.dim_scooberjobregion s
+                                ON av.scooberjobregionid = s.scooberjobregionid
+             WHERE s.country IN ('DE', 'DEL', 'AT')
+             GROUP BY 1, 2
+         ),
+         shifts AS (
+             SELECT s.city                                AS city,
+                    s.shift_date                          AS day,
+                    SUM(s.planned_hours)                  AS planned_hours,
+                    SUM(s.logged_in_within_shift_hours)   AS logged_in_hours,
+                    SUM(CASE
+                            WHEN s.paid_no_show
+                                THEN s.planned_hours END) AS paid_absence_hours,
+                    SUM(CASE
+                            WHEN s.unpaid_no_show_excused
+                                THEN s.planned_hours END) AS unpaid_excused_absence_hours,
+                    SUM(CASE
+                            WHEN s.unpaid_no_show_unexcused
+                                THEN s.planned_hours END) AS unpaid_unexcused_absence_hours,
+                    SUM(CASE
+                            WHEN (s.vehicletype = 'E_BIKE')
+                                THEN s.planned_hours END) AS ebike_driver_hours,
+                    SUM(CASE
+                            WHEN (s.vehicletype = 'BIKE' AND d.vehicleownership = 'COMPANY')
+                                THEN s.planned_hours END) AS swapfiet_driver_hours,
+                    SUM(CASE
+                            WHEN (s.vehicletype = 'BIKE' AND d.vehicleownership = 'DRIVER')
+                                THEN s.planned_hours END) AS bike_driver_hours,
+                    SUM(CASE
+                            WHEN (s.vehicletype = 'CAR' OR s.vehicletype = 'SCOOTER')
+                                THEN s.planned_hours END) AS car_scooter_driver_hours
+             FROM trash.is_de_at_shifts s
+                      LEFT JOIN dwh.dim_driver d
+                                ON s.driver_id = d.driverid
+             WHERE s.shift_date >= '2019-04-01'
+             GROUP BY 1, 2
+         ),
+         vacations AS (
+             SELECT s.scooberjobregion                                                          AS city,
+                    v.day                                                                       AS day,
+                    COUNT(CASE WHEN v.status = 'approved' THEN 1 END)                           AS approved,
+                    COUNT(CASE WHEN v.status = 'pending' THEN 1 END)                            AS pending,
+                    COUNT(CASE WHEN v.status = 'declined' THEN 1 END)                           AS declined,
+                    COUNT(
+                            CASE WHEN (v.status = 'approved' AND v.reason = 'sick') THEN 1 END) AS approved_sick,
+                    COUNT(CASE
+                              WHEN (v.status = 'approved' AND v.reason = 'vacation')
+                                  THEN 1 END)                                                   AS approved_vacation,
+                    COUNT(
+                            CASE WHEN (v.status = 'approved' AND v.reason = 'free') THEN 1 END) AS approved_free,
+                    COUNT(CASE WHEN (v.status = 'approved' AND v.reason = '') THEN 1 END)       AS approved_no_reason
+             FROM trash.is_de_at_vacations v
+                      LEFT JOIN dwh.dim_driver d
+                                ON d.driverid = v.driver_id
+                      LEFT JOIN dwh.dim_scooberjobregion s
+                                ON d.city = LOWER(s.scooberjobregion)
+             WHERE d.country IN ('DE', 'DEL', 'AT')
+             GROUP BY 1, 2
+             ORDER BY 1, 2
+         ),
+         min_hour_compliance_weekly AS (
+             WITH min_hours_driver_level AS (
+                 WITH vacations AS (
+                     SELECT SPLIT_PART(SUBSTRING(v.user, 7, 7), '}', 1)::INT  AS driver_id,
+                            date.year                                         AS year,
+                            date.weeknumber                                   AS week,
+                            COUNT(CASE WHEN v.status = 'approved' THEN 1 END) AS approved
+                     FROM mylorry.vacations v
+                              LEFT JOIN dwh.dim_date date
+                                        ON date.date BETWEEN v.fromdate AND v.todate
+                              LEFT JOIN dwh.dim_driver d
+                                        ON d.driverid = SPLIT_PART(SUBSTRING(v.user, 7, 7), '}', 1)::INT
+                     WHERE d.country IN ('DE', 'DEL', 'AT')
+                           --and date.date >= '2019-04-01'
+                     GROUP BY 1, 2, 3
+                 )
+                 SELECT d.city                                      AS city,
+                        d.driver_id                                 AS driverid,
+                        date.year                                   AS year,
+                        date.weeknumber                             AS week,
+                        d.minworkinghoursperweek                    AS contractual_min_hours,
+                        DATE_DIFF('day', MIN(date.date),
+                                  MAX(date.date)) +
+                        1                                           AS contracted_days,
+                        NVL(AVG(v.approved), 0)                     AS approved_absence_days,
+                        GREATEST(0, contractual_min_hours * contracted_days /
+                                    7.0)                            AS real_contractual_min_hours,
+                        GREATEST(0, contractual_min_hours * (contracted_days - approved_absence_days) /
+                                    7.0)                            AS real_min_hours,
+                        NVL(SUM(CASE WHEN approved_absence_reason IS NULL THEN s.planned_hours END),
+                            0)                                      AS hours_planned,
+                        real_min_hours <= hours_planned             AS min_hours_reached,
+                        CASE
+                            WHEN min_hours_reached THEN 0
+                            ELSE real_min_hours - hours_planned END AS missing_hours
+                 FROM trash.is_de_at_drivers d
+                          LEFT JOIN dwh.dim_date date
+                                    ON date.date BETWEEN d.first_shift AND NVL(d.last_shift, GETDATE()::DATE)
+                          LEFT JOIN trash.is_de_at_shifts s
+                                    ON d.driver_id = s.driver_id AND date.date = s.shift_date
+                          LEFT JOIN vacations v
+                                    ON v.driver_id = d.driver_id AND v.week = date.weeknumber AND v.year = date.year
+                 GROUP BY 1, 2, 3, 4, 5
+             )
+             SELECT mhdl.city                                                  AS city,
+                    mhdl.year                                                  AS year,
+                    mhdl.week                                                  AS week,
+                    COUNT(CASE WHEN mhdl.min_hours_reached THEN 1 END)         AS drivers_min_hour_compliant,
+                    COUNT(CASE WHEN NOT mhdl.min_hours_reached THEN 1 END)     AS drivers_min_hour_issue,
+                    COUNT(*)                                                   AS drivers_total,
+                    1.0 * drivers_min_hour_compliant / drivers_total           AS driver_min_hour_compliance_rate,
+                    1.0 * drivers_min_hour_issue / drivers_total               AS driver_min_hour_issue_rate,
+                    SUM(mhdl.contractual_min_hours)                            AS min_hours_contractual,
+                    SUM(mhdl.real_contractual_min_hours)                       AS min_hours_real_contractual,
+                    SUM(mhdl.missing_hours)                                    AS min_hours_not_fullfilled,
+                    SUM(mhdl.real_min_hours)                                   AS min_hours_real,
+                    1.0 - min_hours_not_fullfilled / NULLIF(min_hours_real, 0) AS min_hour_compliance_rate,
+                    1.0 * min_hours_not_fullfilled / NULLIF(min_hours_real, 0) AS min_hour_issue_rate
+             FROM min_hours_driver_level mhdl
+             GROUP BY 1, 2, 3
+         ),
+         min_hour_compliance_monthly AS (
+             WITH min_hours_driver_level AS (
+                 WITH vacations AS (
+                     SELECT SPLIT_PART(SUBSTRING(v.user, 7, 7), '}', 1)::INT  AS driver_id,
+                            date.year                                         AS year,
+                            date.monthnumber                                  AS month,
+                            COUNT(CASE WHEN v.status = 'approved' THEN 1 END) AS approved
+                     FROM mylorry.vacations v
+                              LEFT JOIN dwh.dim_date date
+                                        ON date.date BETWEEN v.fromdate AND v.todate
+                              LEFT JOIN dwh.dim_driver d
+                                        ON d.driverid = SPLIT_PART(SUBSTRING(v.user, 7, 7), '}', 1)::INT
+                     WHERE d.country IN ('DE', 'DEL', 'AT')
+                           --and date.date >= '2019-04-01'
+                     GROUP BY 1, 2, 3
+                 )
+                 SELECT d.city                                      AS city,
+                        d.driver_id                                 AS driverid,
+                        date.year                                   AS year,
+                        date.monthnumber                            AS month,
+                        d.minworkinghourspermonth                   AS contractual_min_hours,
+                        d.contractworkinghourspermonth              AS contractual_contract_working_hours,
+                        DATE_PART('day', LAST_DAY(date.date))       AS days_in_month,
+                        DATE_DIFF('day', MIN(date.date),
+                                  MAX(date.date)) +
+                        1                                           AS contracted_days,
+                        NVL(AVG(v.approved), 0)                     AS approved_absence_days,
+                        GREATEST(0, contractual_min_hours * contracted_days /
+                                    days_in_month)                  AS real_contractual_min_hours,
+                        GREATEST(0, contractual_min_hours * (contracted_days - approved_absence_days) /
+                                    days_in_month)                  AS real_min_hours,
+                        GREATEST(0, contractual_contract_working_hours * contracted_days /
+                                    days_in_month)                  AS real_contractual_contract_working_hours,
+                        GREATEST(0, contractual_contract_working_hours * (contracted_days - approved_absence_days) /
+                                    days_in_month)                  AS real_contract_working_hours,
+                        NVL(SUM(CASE WHEN approved_absence_reason IS NULL THEN s.planned_hours END),
+                            0)                                      AS hours_planned,
+                        real_min_hours <= hours_planned             AS min_hours_reached,
+                        CASE
+                            WHEN min_hours_reached THEN 0
+                            ELSE real_min_hours - hours_planned END AS missing_hours
+                 FROM trash.is_de_at_drivers d
+                          LEFT JOIN dwh.dim_date date
+                                    ON date.date BETWEEN d.first_shift AND NVL(d.last_shift, GETDATE()::DATE - 1)
+                          LEFT JOIN trash.is_de_at_shifts s
+                                    ON d.driver_id = s.driver_id AND date.date = s.shift_date
+                          LEFT JOIN vacations v
+                                    ON v.driver_id = d.driver_id AND v.month = date.monthnumber AND v.year = date.year
+                 GROUP BY 1, 2, 3, 4, 5, 6, 7
+             )
+             SELECT mhdl.city                                                  AS city,
+                    mhdl.year                                                  AS year,
+                    mhdl.month                                                 AS month,
+                    COUNT(CASE WHEN mhdl.min_hours_reached THEN 1 END)         AS drivers_min_hour_compliant,
+                    COUNT(CASE WHEN NOT mhdl.min_hours_reached THEN 1 END)     AS drivers_min_hour_issue,
+                    COUNT(*)                                                   AS drivers_total,
+                    1.0 * drivers_min_hour_compliant / drivers_total           AS driver_min_hour_compliance_rate,
+                    1.0 * drivers_min_hour_issue / drivers_total               AS driver_min_hour_issue_rate,
+                    SUM(mhdl.contractual_min_hours)                            AS min_hours_contractual,
+                    SUM(mhdl.real_contractual_min_hours)                       AS min_hours_real_contractual,
+                    SUM(mhdl.missing_hours)                                    AS min_hours_not_fullfilled,
+                    SUM(mhdl.real_min_hours)                                   AS min_hours_real,
+                    SUM(mhdl.contractual_contract_working_hours)               AS contract_hours_contractual,
+                    SUM(mhdl.real_contractual_contract_working_hours)          AS contract_hours_real_contractual,
+                    SUM(mhdl.real_contract_working_hours)                      AS contract_hours_real,
+                    1.0 - min_hours_not_fullfilled / NULLIF(min_hours_real, 0) AS min_hour_compliance_rate,
+                    1.0 * min_hours_not_fullfilled / NULLIF(min_hours_real, 0) AS min_hour_issue_rate
+             FROM min_hours_driver_level mhdl
+             GROUP BY 1, 2, 3
+             ORDER BY 1, 2, 3
+         ),
+         interval AS (
+             SELECT scooberjobregion                                 AS city,
+                    orderday                                         AS day,
+                    SUM(hrs_shiftplanned_com)                        AS planned_hours,
+                    SUM(login_hrs_within_shift)                      AS login_within_shift_hours,
+                    SUM(total_closed_duration_15mininterval) / 60.0  AS closed_hours,
+                    SUM(total_lowered_duration_15mininterval) / 60.0 AS ranked_hours,
+                    SUM(idle_hrs)                                    AS idle_hours,
+                    SUM(pause_within_shift_outside_job)              AS pause_hours,
+                    SUM(actual_orders)                               AS orders,
+                    SUM(forecast_orders)                             AS forecast_orders,
+                    SUM(potential_orders)                            AS potential_orders,
+                    SUM(i.potential_orders) - SUM(actual_orders)     AS lost_orders
+             FROM dwh_scoober_perf.scooberoperation_15mins i
+             WHERE country IN ('DE', 'DEL', 'AT')
+             GROUP BY 1, 2
+             ORDER BY 1, 2
+         )
+    SELECT sjr.country                                                        AS country,
+           NVL(fdd.city, s.city)                                              AS city,
+           CASE
+               WHEN sjr.reportgroup = 'DE-Remote' THEN 'DE-R'
+               ELSE sjr.reportgroup END                                       AS region,
+           CASE
+               WHEN NVL(fdd.city, s.city) = 'Berlin'
+                   THEN 1
+               WHEN NVL(fdd.city, s.city) IN
+                    ('Dusseldorf', 'Frankfurt', 'Hamburg', 'Koeln', 'Munich', 'Vienna')
+                   THEN 2
+               WHEN NVL(fdd.city, s.city) IN
+                    ('Bonn', 'Dresden', 'Essen', 'Hanover',
+                     'Karlsruhe', 'Leipzig', 'Nuremberg', 'Stuttgart', 'Graz', 'Linz', 'Salzburg')
+                   THEN 3
+               WHEN NVL(fdd.city, s.city) IN
+                    ('Mainz', 'Dortmund', 'Mannheim', 'Fuerth', 'Munster', 'Augsburg', 'Regensburg', 'Wiesbaden',
+                     'Braunschweig', 'Darmstadt', 'Offenbach', 'Bremen', 'Freiburg', 'Innsbruck')
+                   THEN 4
+               WHEN NVL(fdd.city, s.city) IN
+                    ('Pasing-Munich', 'Bielefeld', 'Berlinspandau',
+                     'Saarbrucken', 'Heidelberg', 'Gottingen', 'Koblenz', 'Kassel',
+                     'Osnabruck', 'Kiel', 'Krefeld', 'Moenchengladbach', 'Bochum', 'Munichost', 'Klagenfurt',
+                     'Duisburg', 'Chemnitz', 'Bochum', 'Herne', 'Leverkusen', 'Wuppertal', 'Stpoelten', 'Viennanorth',
+                     'Aachen', 'Wurzburg', 'Oberhausen')
+                   THEN 5
+               ELSE -1 END                                                    AS category,
+           NVL(fdd.day, s.day)::DATE                                          AS date,
+           DATE_PART(w, NVL(fdd.day, s.day))                                  AS week,
+           DATE_PART(month, NVL(fdd.day, s.day))                              AS month,
+           DATE_PART(y, NVL(fdd.day, s.day))                                  AS year,
+           CASE
+               WHEN DATE_PART(dow, NVL(fdd.day, s.day)) = 1 THEN 'Monday'
+               WHEN DATE_PART(dow, NVL(fdd.day, s.day)) = 2 THEN 'Tuesday'
+               WHEN DATE_PART(dow, NVL(fdd.day, s.day)) = 3 THEN 'Wednesday'
+               WHEN DATE_PART(dow, NVL(fdd.day, s.day)) = 4 THEN 'Thursday'
+               WHEN DATE_PART(dow, NVL(fdd.day, s.day)) = 5 THEN 'Friday'
+               WHEN DATE_PART(dow, NVL(fdd.day, s.day)) = 6 THEN 'Saturday'
+               WHEN DATE_PART(dow, NVL(fdd.day, s.day)) = 0 THEN 'Sunday' END AS day_type,
+
+           --orders
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(o.orders, 0) END                                  AS actual_orders,
+           --fc.stfc                                                           AS weekly_forecast,
+           CASE
+               WHEN sjr.country = 'AT' THEN fso.forecastorders
+               ELSE fdd.local_fc END                                          AS weekly_forecast,
+           CASE
+               WHEN sjr.country = 'AT' THEN fso.forecastorders
+               ELSE fdd.global_fc END                                         AS weekly_forecast_global,
+           fdd.long_term_fc                                                   AS monthly_forecast,
+           CASE
+               WHEN i.potential_orders = 0 OR i.potential_orders IS NULL THEN NULL
+               ELSE GREATEST(i.potential_orders, actual_orders) END           AS potential_orders_tianang,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(co.canceled_orders, 0) END                        AS canceled_orders,
+           --GREATEST(i.potential_orders, actual_orders)                     AS potential_orders_tianang,
+
+           --restaurants
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(ore.online_restaurants, 0) END                    AS online_restaurants,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(ore.temp_off_restaurants, 0) END                  AS temp_off_restaurants,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(a_r_d.active_restaurants, 0) END                  AS active_restaurants_daily,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(a_r_w.active_restaurants, 0) END                  AS active_restaurants_weekly,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(a_r_m.active_restaurants, 0) END                  AS active_restaurants_monthly,
+
+           --hours
+           NVL(av.available_hours, 0)                                         AS available_hours,
+           --fc.demand                                                         AS demand_hours,
+           --fc.demand_fulfilisent                                             AS demand_fulfilisent_hours,
+           --fc.overstuffed_hours                                              AS overstaffing_hours,
+           dd.demand_hours                                                    AS demand_hours,
+           dd.demand_fulfilisent_hours                                        AS demand_fulfilisent_hours,
+           dd.overstaffed_hours                                               AS overstaffing_hours,
+           NVL(s.planned_hours, 0)                                            AS planned_hours,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(s.logged_in_hours, 0) END                         AS worked_hours,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(ore.online_restaurants_closed_hours, 0) END       AS restaurants_closed_hours,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(ore.city_closed_hours, 0) END                     AS closed_hours,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(s.ebike_driver_hours, 0) END                      AS ebike_driver_hours,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(s.swapfiet_driver_hours, 0) END                   AS swapfiet_driver_hours,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(s.bike_driver_hours, 0) END                       AS bike_driver_hours,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(s.car_scooter_driver_hours, 0) END                AS car_scooter_driver_hours,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(s.paid_absence_hours, 0) END                      AS paid_absence_hours,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(s.unpaid_excused_absence_hours, 0) END            AS unpaid_excused_absence_hours,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(s.unpaid_unexcused_absence_hours, 0) END          AS unpaid_unexcused_absence_hours,
+
+           --drivers
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(c_d_d.contracted_drivers, 0) END                  AS contracted_drivers,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(c_d_d.new_drivers, 0) END                         AS new_drivers,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(c_d_d.churned_drivers, 0) END                     AS churned_drivers,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(c_d_d.total_active_months_churned_drivers, 0) END AS total_active_months_churned_drivers,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(a_d_d.active_drivers, 0) END                      AS active_drivers_daily,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(a_d_w.active_drivers, 0) END                      AS active_drivers_weekly,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(a_d_m.active_drivers, 0) END                      AS active_drivers_monthly,
+           NVL(v.approved_sick, 0)                                            AS drivers_sick,
+           NVL(v.approved_vacation, 0)                                        AS drivers_vacation,
+           NVL(v.approved_free, 0)                                            AS drivers_vacation_unpaid,
+           NVL(v.pending, 0)                                                  AS drivers_pending_absence_request,
+
+           --performance
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(o.pooljoborders, 0) END                           AS pooljob_orders,
+           o.o2d_deliverytime                                                 AS delivery_time,
+           o.f2d_deliverytime                                                 AS in_bag_time,
+           o.total_dist_m                                                     AS order_dist,
+           o.delivery_dist_m                                                  AS delivery_dist,
+
+           --tianang
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(i.idle_hours, 0) END                              AS idle_hours_tianang,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(i.pause_hours, 0) END                             AS pause_hours_tianang,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(i.login_within_shift_hours, 0) END                AS worked_hours_tianang,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN i.closed_hours END                                    AS closed_hours_tianang,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN i.ranked_hours END                                    AS ranked_hours_tianang,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   --AND i.orders IS NOT NULL
+                   --AND i.orders <> 0
+                   THEN CASE
+                            WHEN sjr.country = 'AT' THEN 11
+                            WHEN DATE_PART(dow, NVL(fdd.day, s.day)) IN (0, 6) THEN 10
+                            ELSE 10.5 END END                                 AS operational_hours,
+           CASE
+               WHEN i.potential_orders = 0 OR i.potential_orders IS NULL THEN NULL
+               ELSE
+                   CASE
+                       WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                           THEN NVL(i.lost_orders, 0) END END                 AS lost_orders_tianang,
+           CASE
+               WHEN NVL(fdd.day, s.day) < GETDATE()::DATE
+                   THEN NVL(i.orders, 0) END                                  AS orders_tianang,
+
+           --min hour compliance
+           NVL(m_h_c_w.min_hours_real, 0)                                     AS real_min_hours_weekly,
+           NVL(m_h_c_w.min_hours_real_contractual, 0)                         AS contractual_min_hours_weekly,
+           NVL(m_h_c_w.min_hours_real - m_h_c_w.min_hours_not_fullfilled, 0)  AS min_hours_fulfilled_weekly,
+           NVL(m_h_c_w.drivers_min_hour_compliant, 0)                         AS drivers_min_hours_compliant_weekly,
+           NVL(m_h_c_w.drivers_total, 0)                                      AS drivers_total_weekly,
+           NVL(m_h_c_m.min_hours_real, 0)                                     AS real_min_hours_monthly,
+           NVL(m_h_c_m.contract_hours_real, 0)                                AS real_contracted_hours_monthly,
+           NVL(m_h_c_m.min_hours_real_contractual, 0)                         AS contractual_min_hours_monthly,
+           NVL(m_h_c_m.min_hours_real - m_h_c_m.min_hours_not_fullfilled, 0)  AS min_hours_fulfilled_monthly,
+           NVL(m_h_c_m.drivers_min_hour_compliant, 0)                         AS drivers_min_hours_compliant_monthly,
+           NVL(m_h_c_m.drivers_total, 0)                                      AS drivers_total_monthly,
+
+           --SLAs
+           o.achieved_sla1                                                    AS achieved_sla1,
+           o.achieved_sla2                                                    AS achieved_sla2,
+           o.achieved_sla3                                                    AS achieved_sla3,
+           o.achieved_sla4                                                    AS achieved_sla4,
+           o.not_achieved_sla1                                                AS not_achieved_sla1,
+           o.not_achieved_sla2                                                AS not_achieved_sla2,
+           o.not_achieved_sla3                                                AS not_achieved_sla3,
+           o.not_achieved_sla4                                                AS not_achieved_sla4
+    FROM shifts s
+             FULL OUTER JOIN trash.lm_de_forecasts fdd
+                             ON s.day = fdd.day and s.city = fdd.city
+             LEFT JOIN orders o
+                       ON NVL(fdd.day, s.day) = o.day AND NVL(fdd.city, s.city) = o.city
+             LEFT JOIN canceled_orders co
+                       ON NVL(fdd.day, s.day) = co.day AND NVL(fdd.city, s.city) = co.city
+             LEFT JOIN online_restaurants ore
+                       ON NVL(fdd.day, s.day) = ore.day AND NVL(fdd.city, s.city) = ore.city
+             LEFT JOIN active_restaurants_daily a_r_d
+                       ON NVL(fdd.day, s.day) = a_r_d.day AND NVL(fdd.city, s.city) = a_r_d.city
+             LEFT JOIN active_restaurants_weekly a_r_w
+                       ON DATE_PART(w, NVL(fdd.day, s.day)) = a_r_w.week AND
+                          DATE_PART(y, NVL(fdd.day, s.day)) = a_r_w.year AND
+                          NVL(fdd.city, s.city) = a_r_w.city --AND DATE_PART(dow, NVL(fdd.day, s.day)) = 1
+             LEFT JOIN active_restaurants_monthly a_r_m
+                       ON DATE_PART(month, NVL(fdd.day, s.day)) = a_r_m.month AND
+                          DATE_PART(y, NVL(fdd.day, s.day)) = a_r_m.year AND
+                          NVL(fdd.city, s.city) = a_r_m.city --AND DATE_PART(d, NVL(fdd.day, s.day)) = 1
+             LEFT JOIN contracted_drivers_daily c_d_d
+                       ON NVL(fdd.day, s.day) = c_d_d.day AND NVL(fdd.city, s.city) = c_d_d.city
+        /*LEFT JOIN contracted_drivers_weekly c_d_w
+                  ON DATE_PART(w, NVL(fdd.day, s.day)) = c_d_w.week AND
+                     DATE_PART(y, NVL(fdd.day, s.day)) = c_d_w.year AND
+                     NVL(fdd.city, s.city) = c_d_w.city --AND DATE_PART(dow, NVL(fdd.day, s.day)) = 1
+        LEFT JOIN contracted_drivers_monthly c_d_m
+                  ON DATE_PART(month, NVL(fdd.day, s.day)) = c_d_m.month AND
+                     DATE_PART(y, NVL(fdd.day, s.day)) = c_d_m.year AND
+                     NVL(fdd.city, s.city) = c_d_m.city --AND DATE_PART(d, NVL(fdd.day, s.day)) = 1*/
+             LEFT JOIN active_drivers_daily a_d_d
+                       ON NVL(fdd.day, s.day) = a_d_d.day AND NVL(fdd.city, s.city) = a_d_d.city
+             LEFT JOIN active_drivers_weekly a_d_w
+                       ON DATE_PART(w, NVL(fdd.day, s.day)) = a_d_w.week AND
+                          DATE_PART(y, NVL(fdd.day, s.day)) = a_d_w.year AND
+                          NVL(fdd.city, s.city) = a_d_w.city --AND DATE_PART(dow, NVL(fdd.day, s.day)) = 1
+             LEFT JOIN active_drivers_monthly a_d_m
+                       ON DATE_PART(month, NVL(fdd.day, s.day)) = a_d_m.month AND
+                          DATE_PART(y, NVL(fdd.day, s.day)) = a_d_m.year AND
+                          NVL(fdd.city, s.city) = a_d_m.city --AND DATE_PART(d, NVL(fdd.day, s.day)) = 1
+             LEFT JOIN availabilities av
+                       ON NVL(fdd.day, s.day) = av.day AND NVL(fdd.city, s.city) = av.city
+             LEFT JOIN min_hour_compliance_weekly m_h_c_w
+                       ON DATE_PART(w, NVL(fdd.day, s.day)) = m_h_c_w.week AND
+                          DATE_PART(y, NVL(fdd.day, s.day)) = m_h_c_w.year AND
+                          NVL(fdd.city, s.city) = m_h_c_w.city
+             LEFT JOIN min_hour_compliance_monthly m_h_c_m
+                       ON DATE_PART(month, NVL(fdd.day, s.day)) = m_h_c_m.month AND
+                          DATE_PART(y, NVL(fdd.day, s.day)) = m_h_c_m.year AND
+                          NVL(fdd.city, s.city) = m_h_c_m.city
+             LEFT JOIN vacations v
+                       ON NVL(fdd.day, s.day) = v.day AND NVL(fdd.city, s.city) = v.city
+             LEFT JOIN interval i
+                       ON NVL(fdd.day, s.day) = i.day AND NVL(fdd.city, s.city) = i.city
+             LEFT JOIN trash.is_de_demand_data dd
+                       ON NVL(fdd.day, s.day) = dd.date and NVL(fdd.city, s.city) = dd.city
+             LEFT JOIN dwh.dim_scooberjobregion sjr
+                       ON NVL(fdd.city, s.city) = sjr.scooberjobregion
+             LEFT JOIN dwh.fact_forecastscooberorders_byregion fso
+                       ON NVL(fdd.day, s.day) = fso.orderdate AND NVL(fdd.city, s.city) = fso.scooberjobregion
+    ORDER BY 1, 2, 4
+);
+GRANT SELECT ON trash.lm_de_at_city TO PUBLIC;
+
+--country daily
+SELECT c.country                                                             AS country,
+       c.week                                                                AS week,
+       c.day_type                                                            AS daytype,
+       c.date                                                                AS date,
+
+       --orders
+       SUM(c.actual_orders)                                                  AS delivered_orders,
+       SUM(GREATEST(c.potential_orders_tianang, c.actual_orders))            AS potential_orders,
+       SUM(c.weekly_forecast)                                                AS weekly_forecast,
+       SUM(c.monthly_forecast)                                               AS monthly_forecast,
+
+       --restaurants
+       ROUND(1.0 * SUM(c.online_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_online_restaurants,
+       ROUND(1.0 * SUM(c.temp_off_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_temp_off_restaurants,
+       ROUND(1.0 * SUM(c.active_restaurants_daily)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS active_restaurants,
+
+       --drivers
+       ROUND(1.0 * SUM(c.contracted_drivers)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_contracted_drivers,
+       SUM(c.new_drivers)                                                    AS new_drivers,
+       SUM(c.churned_drivers)                                                AS churned_drivers,
+       ROUND(SUM(c.total_active_months_churned_drivers)
+                 / NULLIF(SUM(c.churned_drivers), 0), 1)                     AS retention_months_churned_drivers,
+       ROUND(1.0 * SUM(c.active_drivers_daily)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS active_drivers,
+
+       --service level
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                       AS delivery_time,
+       ROUND(1.0 * SUM(c.in_bag_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                       AS in_bag_time,
+       ROUND(1.0 * SUM(c.order_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                       AS order_dist,
+       ROUND(1.0 * SUM(c.delivery_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                       AS delivery_dist,
+       ROUND(1.0 * SUM(c.closed_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                   AS closed_time_rate,
+       --ROUND(1.0 * SUM(c.closed_hours)
+       --          / NULLIF(SUM(c.operational_hours), 0), 3)                    AS closed_time_rate_new,
+       ROUND(1.0 * SUM(c.ranked_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                   AS ranked_time_rate,
+       ROUND(1.0 * SUM(c.canceled_orders)
+                 / NULLIF(SUM(c.canceled_orders + c.actual_orders), 0), 3)   AS canceled_orders_rate,
+
+       ROUND(1.0 * SUM(c.lost_orders_tianang)
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                      AS lost_order_rate,
+       ROUND(1.0 * SUM(c.achieved_sla1)
+                 / NULLIF(SUM(c.achieved_sla1 + c.not_achieved_sla1), 0), 3) AS achieved_sla1_rate,
+       ROUND(1.0 * SUM(c.achieved_sla2)
+                 / NULLIF(SUM(c.achieved_sla2 + c.not_achieved_sla2), 0), 3) AS achieved_sla2_rate,
+       ROUND(1.0 * SUM(c.achieved_sla3)
+                 / NULLIF(SUM(c.achieved_sla3 + c.not_achieved_sla3), 0), 3) AS achieved_sla3_rate,
+       ROUND(1.0 * SUM(c.achieved_sla4)
+                 / NULLIF(SUM(c.achieved_sla4 + c.not_achieved_sla4), 0), 3) AS achieved_sla4_rate,
+
+       --planning performance
+       ROUND(1.0 * SUM(c.actual_orders)
+                 / NULLIF(SUM(c.worked_hours), 0), 2)                        AS efficiency,
+       ROUND(1.0 * SUM(c.idle_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                AS idle_time_rate,
+       ROUND(1.0 * SUM(c.pause_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                AS pause_time_rate,
+       ROUND(1.0 * SUM(c.pooljob_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 3)                       AS pooljob_rate,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast_global)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                      AS forecast_inaccuracy_rate_global,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                      AS forecast_inaccuracy_rate_local,
+
+
+       --staffing performance
+       ROUND(1.0 * SUM(c.demand_fulfilisent_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                        AS demand_fulfilisent_rate,
+       ROUND(1.0 * SUM(c.overstaffing_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                        AS overstaffing_rate,
+       NULL                                                                  AS min_hour_compliance_rate,
+       NULL                                                                  AS driver_min_hour_compliance_rate,
+
+       --driver hours
+       NULL                                                                 AS min_hours,
+       ROUND(SUM(c.available_hours), 0)                                      AS available_hours,
+       ROUND(SUM(c.demand_hours), 0)                                         AS demand_hours,
+       ROUND(SUM(c.planned_hours), 0)                                        AS planned_hours,
+       ROUND(SUM(c.worked_hours), 0)                                         AS worked_hours,
+       NULL                                                                  AS open_shift_hours,
+
+       --shift absences
+       ROUND(1.0 * SUM(c.paid_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS paid_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_excused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS unpaid_excused_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_unexcused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS unpaid_unexcused_absence_rate,
+
+       --approved absence requests
+       ROUND(1.0 * SUM(c.drivers_sick)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_drivers_sick,
+       ROUND(1.0 * SUM(c.drivers_vacation)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_drivers_vacation,
+       ROUND(1.0 * SUM(c.drivers_vacation_unpaid)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_drivers_vacation_unpaid,
+
+       --vehicle type
+       ROUND(1.0 * SUM(c.ebike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS ebike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.swapfiet_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS swapfiet_driver_hours_rate,
+       ROUND(1.0 * SUM(c.bike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS bike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.car_scooter_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS car_scooter_driver_hours_rate,
+
+       --indizes
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / (1.0 * SUM(c.actual_orders)
+               / NULLIF(SUM(c.worked_hours), 0)), 2)                         AS logistics_index,
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / (1.0 * SUM(c.demand_fulfilisent_hours)
+                        / NULLIF(SUM(c.demand_hours), 0)
+               * (1 - 1.0 * SUM(c.closed_hours_tianang)
+                   / NULLIF(SUM(c.operational_hours), 0))), 2)               AS health_index
+FROM trash.is_de_at_city c
+WHERE c.year = '2021'
+  AND c.week BETWEEN DATE_PART(w, GETDATE() + 4) - 13 AND DATE_PART(w, GETDATE() + 4)
+GROUP BY 1, 2, 3, 4
+ORDER BY 1, 4;
+
+--city daily
+SELECT c.city                                                                AS city,
+       c.region                                                              AS region,
+       c.category                                                            AS category,
+       c.week                                                                AS week,
+       c.day_type                                                            AS daytype,
+       c.date                                                                AS date,
+
+       --orders
+       SUM(c.actual_orders)                                                  AS delivered_orders,
+       SUM(c.potential_orders_tianang)                                       AS potential_orders,
+       SUM(c.weekly_forecast)                                                AS weekly_forecast,
+       SUM(c.monthly_forecast)                                               AS monthly_forecast,
+
+       --restaurants
+       ROUND(1.0 * SUM(c.online_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_online_restaurants,
+       ROUND(1.0 * SUM(c.temp_off_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_temp_off_restaurants,
+       ROUND(1.0 * SUM(c.active_restaurants_daily)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS active_restaurants,
+
+       --drivers
+       ROUND(1.0 * SUM(c.contracted_drivers)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_contracted_drivers,
+       SUM(c.new_drivers)                                                    AS new_drivers,
+       SUM(c.churned_drivers)                                                AS churned_drivers,
+       ROUND(SUM(c.total_active_months_churned_drivers)
+                 / NULLIF(SUM(c.churned_drivers), 0), 1)                     AS retention_months_churned_drivers,
+       ROUND(1.0 * SUM(c.active_drivers_daily)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS active_drivers,
+
+       --service level
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                       AS delivery_time,
+       ROUND(1.0 * SUM(c.in_bag_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                       AS in_bag_time,
+       ROUND(1.0 * SUM(c.order_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                       AS order_dist,
+       ROUND(1.0 * SUM(c.delivery_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                       AS delivery_dist,
+       ROUND(1.0 * SUM(c.closed_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                   AS closed_time_rate,
+       --ROUND(1.0 * SUM(c.closed_hours)
+       --          / NULLIF(SUM(c.operational_hours), 0), 3)                    AS closed_time_rate_new,
+       ROUND(1.0 * SUM(c.ranked_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                   AS ranked_time_rate,
+       ROUND(1.0 * SUM(c.canceled_orders)
+                 / NULLIF(SUM(c.canceled_orders + c.actual_orders), 0), 3)   AS canceled_orders_rate,
+
+       ROUND(1.0 * SUM(c.lost_orders_tianang)
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                      AS lost_order_rate,
+       ROUND(1.0 * SUM(c.achieved_sla1)
+                 / NULLIF(SUM(c.achieved_sla1 + c.not_achieved_sla1), 0), 3) AS achieved_sla1_rate,
+       ROUND(1.0 * SUM(c.achieved_sla2)
+                 / NULLIF(SUM(c.achieved_sla2 + c.not_achieved_sla2), 0), 3) AS achieved_sla2_rate,
+       ROUND(1.0 * SUM(c.achieved_sla3)
+                 / NULLIF(SUM(c.achieved_sla3 + c.not_achieved_sla3), 0), 3) AS achieved_sla3_rate,
+       ROUND(1.0 * SUM(c.achieved_sla4)
+                 / NULLIF(SUM(c.achieved_sla4 + c.not_achieved_sla4), 0), 3) AS achieved_sla4_rate,
+
+       --planning performance
+       ROUND(1.0 * SUM(c.actual_orders)
+                 / NULLIF(SUM(c.worked_hours), 0), 2)                        AS efficiency,
+       ROUND(1.0 * SUM(c.idle_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                AS idle_time_rate,
+       ROUND(1.0 * SUM(c.pause_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                AS pause_time_rate,
+       ROUND(1.0 * SUM(c.pooljob_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 3)                       AS pooljob_rate,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast_global)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                      AS forecast_inaccuracy_rate_global,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                      AS forecast_inaccuracy_rate_local,
+
+
+       --staffing performance
+       ROUND(1.0 * SUM(c.demand_fulfilisent_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                        AS demand_fulfilisent_rate,
+       ROUND(1.0 * SUM(c.overstaffing_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                        AS overstaffing_rate,
+       NULL                                                                  AS min_hour_compliance_rate,
+       NULL                                                                  AS driver_min_hour_compliance_rate,
+
+       --driver hours
+       NULL                                                                  AS min_hours,
+       ROUND(SUM(c.available_hours), 0)                                      AS available_hours,
+       ROUND(SUM(c.demand_hours), 0)                                         AS demand_hours,
+       ROUND(SUM(c.planned_hours), 0)                                        AS planned_hours,
+       ROUND(SUM(c.worked_hours), 0)                                         AS worked_hours,
+       NULL                                                                  AS open_shift_hours,
+
+       --shift absences
+       ROUND(1.0 * SUM(c.paid_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS paid_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_excused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS unpaid_excused_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_unexcused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS unpaid_unexcused_absence_rate,
+
+       --approved absence requests
+       ROUND(1.0 * SUM(c.drivers_sick)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_drivers_sick,
+       ROUND(1.0 * SUM(c.drivers_vacation)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_drivers_vacation,
+       ROUND(1.0 * SUM(c.drivers_vacation_unpaid)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)           AS avg_drivers_vacation_unpaid,
+
+       --vehicle type
+       ROUND(1.0 * SUM(c.ebike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS ebike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.swapfiet_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS swapfiet_driver_hours_rate,
+       ROUND(1.0 * SUM(c.bike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS bike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.car_scooter_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                       AS car_scooter_driver_hours_rate,
+
+       --indizes
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / NULLIF((1.0 * SUM(c.actual_orders)
+               / NULLIF(SUM(c.worked_hours), 0)), 0), 2)                     AS logistics_index,
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / NULLIF((1.0 * SUM(c.demand_fulfilisent_hours)
+                               / NULLIF(SUM(c.demand_hours), 0)
+               * (1 - 1.0 * SUM(c.closed_hours_tianang)
+                   / NULLIF(SUM(c.operational_hours), 0))), 0), 2)           AS health_index
+FROM trash.is_de_at_city c
+WHERE c.year = '2021'
+  AND c.week BETWEEN DATE_PART(w, GETDATE() + 4) - 13 AND DATE_PART(w, GETDATE() + 4)
+GROUP BY 1, 2, 3, 4, 5, 6
+ORDER BY 1, 6;
+
+--country weekly
+SELECT c.country                                                                             AS country,
+       CASE
+           WHEN c.year = 2021 AND c.week = 53 THEN '2020-53'
+           ELSE
+                   c.year::VARCHAR + '-' + RIGHT('00' + CONVERT(NVARCHAR(2), c.week), 2) END AS week,
+
+       --orders
+       SUM(c.actual_orders)                                                                  AS delivered_orders,
+       SUM(c.potential_orders_tianang)                                                       AS potential_orders,
+       SUM(c.weekly_forecast)                                                                AS weekly_forecast,
+       SUM(c.monthly_forecast)                                                               AS monthly_forecast,
+
+       --restaurants
+       ROUND(1.0 * SUM(c.online_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS avg_online_restaurants,
+       ROUND(1.0 * SUM(c.temp_off_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1),
+             0)                                                                              AS avg_temp_off_restaurants,
+       ROUND(1.0 * SUM(c.active_restaurants_weekly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS active_restaurants,
+
+       --drivers
+       ROUND(1.0 * SUM(c.contracted_drivers)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS avg_contracted_drivers,
+       SUM(c.new_drivers)                                                                    AS new_drivers,
+       SUM(c.churned_drivers)                                                                AS churned_drivers,
+       ROUND(SUM(c.total_active_months_churned_drivers)
+                 / NULLIF(SUM(c.churned_drivers), 0),
+             1)                                                                              AS retention_months_churned_drivers,
+       ROUND(1.0 * SUM(c.active_drivers_weekly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS active_drivers,
+
+       --service level
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                                       AS delivery_time,
+       ROUND(1.0 * SUM(c.in_bag_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                                       AS in_bag_time,
+       ROUND(1.0 * SUM(c.order_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                                       AS order_dist,
+       ROUND(1.0 * SUM(c.delivery_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                                       AS delivery_dist,
+       ROUND(1.0 * SUM(c.closed_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                                   AS closed_time_rate,
+       --ROUND(1.0 * SUM(c.closed_hours)
+       --          / NULLIF(SUM(c.operational_hours), 0), 3)                    AS closed_time_rate_new,
+       ROUND(1.0 * SUM(c.ranked_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                                   AS ranked_time_rate,
+       ROUND(1.0 * SUM(c.canceled_orders)
+                 / NULLIF(SUM(c.canceled_orders + c.actual_orders), 0), 3)                   AS canceled_orders_rate,
+
+       ROUND(1.0 * SUM(c.lost_orders_tianang)
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                                      AS lost_order_rate,
+       ROUND(1.0 * SUM(c.achieved_sla1)
+                 / NULLIF(SUM(c.achieved_sla1 + c.not_achieved_sla1), 0), 3)                 AS achieved_sla1_rate,
+       ROUND(1.0 * SUM(c.achieved_sla2)
+                 / NULLIF(SUM(c.achieved_sla2 + c.not_achieved_sla2), 0), 3)                 AS achieved_sla2_rate,
+       ROUND(1.0 * SUM(c.achieved_sla3)
+                 / NULLIF(SUM(c.achieved_sla3 + c.not_achieved_sla3), 0), 3)                 AS achieved_sla3_rate,
+       ROUND(1.0 * SUM(c.achieved_sla4)
+                 / NULLIF(SUM(c.achieved_sla4 + c.not_achieved_sla4), 0), 3)                 AS achieved_sla4_rate,
+
+       --planning performance
+       ROUND(1.0 * SUM(c.actual_orders)
+                 / NULLIF(SUM(c.worked_hours), 0), 2)                                        AS efficiency,
+       ROUND(1.0 * SUM(c.idle_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                                AS idle_time_rate,
+       ROUND(1.0 * SUM(c.pause_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                                AS pause_time_rate,
+       ROUND(1.0 * SUM(c.pooljob_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 3)                                       AS pooljob_rate,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast_global)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0),
+             3)                                                                              AS forecast_inaccuracy_rate_global,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0),
+             3)                                                                              AS forecast_inaccuracy_rate_local,
+
+
+       --staffing performance
+       ROUND(1.0 * SUM(c.demand_fulfilisent_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                                        AS demand_fulfilisent_rate,
+       ROUND(1.0 * SUM(c.overstaffing_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                                        AS overstaffing_rate,
+       ROUND(1.0 * SUM(c.min_hours_fulfilled_weekly)
+                 / NULLIF(SUM(c.real_min_hours_weekly), 0),
+             3)                                                                              AS min_hour_compliance_rate,
+       ROUND(1.0 * SUM(c.drivers_min_hours_compliant_weekly)
+                 / NULLIF(SUM(c.drivers_total_weekly), 0),
+             3)                                                                              AS driver_min_hour_compliance_rate,
+
+       --driver hours
+       ROUND(1.0 * SUM(c.real_min_hours_weekly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS min_hours,
+       ROUND(SUM(c.available_hours), 0)                                                      AS available_hours,
+       ROUND(SUM(c.demand_hours), 0)                                                         AS demand_hours,
+       ROUND(SUM(c.planned_hours), 0)                                                        AS planned_hours,
+       ROUND(SUM(c.worked_hours), 0)                                                         AS worked_hours,
+       NULL                                                                                  AS open_shift_hours,
+
+       --shift absences
+       ROUND(1.0 * SUM(c.paid_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                                       AS paid_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_excused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0),
+             3)                                                                              AS unpaid_excused_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_unexcused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0),
+             3)                                                                              AS unpaid_unexcused_absence_rate,
+
+       --approved absence requests
+       ROUND(1.0 * SUM(c.drivers_sick)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS avg_drivers_sick,
+       ROUND(1.0 * SUM(c.drivers_vacation)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS avg_drivers_vacation,
+       ROUND(1.0 * SUM(c.drivers_vacation_unpaid)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1),
+             0)                                                                              AS avg_drivers_vacation_unpaid,
+
+       --vehicle type
+       ROUND(1.0 * SUM(c.ebike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                                       AS ebike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.swapfiet_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0),
+             3)                                                                              AS swapfiet_driver_hours_rate,
+       ROUND(1.0 * SUM(c.bike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                                       AS bike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.car_scooter_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0),
+             3)                                                                              AS car_scooter_driver_hours_rate,
+
+       --indizes
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / (1.0 * SUM(c.actual_orders)
+               / NULLIF(SUM(c.worked_hours), 0)), 2)                                         AS logistics_index,
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / (1.0 * SUM(c.demand_fulfilisent_hours)
+                        / NULLIF(SUM(c.demand_hours), 0)
+               * (1 - 1.0 * SUM(c.closed_hours_tianang)
+                   / NULLIF(SUM(c.operational_hours), 0))), 2)                               AS health_index
+FROM trash.is_de_at_city c
+WHERE (c.year = '2020' AND c.week > DATE_PART(w, GETDATE()) + 25)
+   OR (c.year = '2021' AND c.week < DATE_PART(w, GETDATE()))
+   OR (c.year = '2021' AND c.week = 53)
+GROUP BY 1, 2
+ORDER BY 1, 2;
+
+--city weekly
+SELECT c.city                                                                                AS city,
+       c.region                                                                              AS region,
+       c.category                                                                            AS category,
+       CASE
+           WHEN c.year = 2021 AND c.week = 53 THEN '2020-53'
+           ELSE
+                   c.year::VARCHAR + '-' + RIGHT('00' + CONVERT(NVARCHAR(2), c.week), 2) END AS week,
+
+       --orders
+       SUM(c.actual_orders)                                                                  AS delivered_orders,
+       SUM(c.potential_orders_tianang)                                                       AS potential_orders,
+       SUM(c.weekly_forecast)                                                                AS weekly_forecast,
+       SUM(c.monthly_forecast)                                                               AS monthly_forecast,
+
+       --restaurants
+       ROUND(1.0 * SUM(c.online_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS avg_online_restaurants,
+       ROUND(1.0 * SUM(c.temp_off_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1),
+             0)                                                                              AS avg_temp_off_restaurants,
+       ROUND(1.0 * SUM(c.active_restaurants_weekly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS active_restaurants,
+
+       --drivers
+       ROUND(1.0 * SUM(c.contracted_drivers)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS avg_contracted_drivers,
+       SUM(c.new_drivers)                                                                    AS new_drivers,
+       SUM(c.churned_drivers)                                                                AS churned_drivers,
+       ROUND(SUM(c.total_active_months_churned_drivers)
+                 / NULLIF(SUM(c.churned_drivers), 0),
+             1)                                                                              AS retention_months_churned_drivers,
+       ROUND(1.0 * SUM(c.active_drivers_weekly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS active_drivers,
+
+       --service level
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                                       AS delivery_time,
+       ROUND(1.0 * SUM(c.in_bag_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                                       AS in_bag_time,
+       ROUND(1.0 * SUM(c.order_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                                       AS order_dist,
+       ROUND(1.0 * SUM(c.delivery_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                                       AS delivery_dist,
+       ROUND(1.0 * SUM(c.closed_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                                   AS closed_time_rate,
+       --ROUND(1.0 * SUM(c.closed_hours)
+       --          / NULLIF(SUM(c.operational_hours), 0), 3)                    AS closed_time_rate_new,
+       ROUND(1.0 * SUM(c.ranked_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                                   AS ranked_time_rate,
+       ROUND(1.0 * SUM(c.canceled_orders)
+                 / NULLIF(SUM(c.canceled_orders + c.actual_orders), 0), 3)                   AS canceled_orders_rate,
+
+       ROUND(1.0 * SUM(c.lost_orders_tianang)
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                                      AS lost_order_rate,
+       ROUND(1.0 * SUM(c.achieved_sla1)
+                 / NULLIF(SUM(c.achieved_sla1 + c.not_achieved_sla1), 0), 3)                 AS achieved_sla1_rate,
+       ROUND(1.0 * SUM(c.achieved_sla2)
+                 / NULLIF(SUM(c.achieved_sla2 + c.not_achieved_sla2), 0), 3)                 AS achieved_sla2_rate,
+       ROUND(1.0 * SUM(c.achieved_sla3)
+                 / NULLIF(SUM(c.achieved_sla3 + c.not_achieved_sla3), 0), 3)                 AS achieved_sla3_rate,
+       ROUND(1.0 * SUM(c.achieved_sla4)
+                 / NULLIF(SUM(c.achieved_sla4 + c.not_achieved_sla4), 0), 3)                 AS achieved_sla4_rate,
+
+       --planning performance
+       ROUND(1.0 * SUM(c.actual_orders)
+                 / NULLIF(SUM(c.worked_hours), 0), 2)                                        AS efficiency,
+       ROUND(1.0 * SUM(c.idle_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                                AS idle_time_rate,
+       ROUND(1.0 * SUM(c.pause_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                                AS pause_time_rate,
+       ROUND(1.0 * SUM(c.pooljob_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 3)                                       AS pooljob_rate,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast_global)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0),
+             3)                                                                              AS forecast_inaccuracy_rate_global,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0),
+             3)                                                                              AS forecast_inaccuracy_rate_local,
+
+
+       --staffing performance
+       ROUND(1.0 * SUM(c.demand_fulfilisent_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                                        AS demand_fulfilisent_rate,
+       ROUND(1.0 * SUM(c.overstaffing_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                                        AS overstaffing_rate,
+       ROUND(1.0 * SUM(c.min_hours_fulfilled_weekly)
+                 / NULLIF(SUM(c.real_min_hours_weekly), 0),
+             3)                                                                              AS min_hour_compliance_rate,
+       ROUND(1.0 * SUM(c.drivers_min_hours_compliant_weekly)
+                 / NULLIF(SUM(c.drivers_total_weekly), 0),
+             3)                                                                              AS driver_min_hour_compliance_rate,
+
+       --driver hours
+       ROUND(1.0 * SUM(c.real_min_hours_weekly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS min_hours,
+       ROUND(SUM(c.available_hours), 0)                                                      AS available_hours,
+       ROUND(SUM(c.demand_hours), 0)                                                         AS demand_hours,
+       ROUND(SUM(c.planned_hours), 0)                                                        AS planned_hours,
+       ROUND(SUM(c.worked_hours), 0)                                                         AS worked_hours,
+       NULL                                                                                  AS open_shift_hours,
+
+       --shift absences
+       ROUND(1.0 * SUM(c.paid_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                                       AS paid_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_excused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0),
+             3)                                                                              AS unpaid_excused_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_unexcused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0),
+             3)                                                                              AS unpaid_unexcused_absence_rate,
+
+       --approved absence requests
+       ROUND(1.0 * SUM(c.drivers_sick)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS avg_drivers_sick,
+       ROUND(1.0 * SUM(c.drivers_vacation)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)                           AS avg_drivers_vacation,
+       ROUND(1.0 * SUM(c.drivers_vacation_unpaid)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1),
+             0)                                                                              AS avg_drivers_vacation_unpaid,
+
+       --vehicle type
+       ROUND(1.0 * SUM(c.ebike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                                       AS ebike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.swapfiet_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0),
+             3)                                                                              AS swapfiet_driver_hours_rate,
+       ROUND(1.0 * SUM(c.bike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                                       AS bike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.car_scooter_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0),
+             3)                                                                              AS car_scooter_driver_hours_rate,
+
+       --indizes
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / (1.0 * SUM(c.actual_orders)
+               / NULLIF(SUM(c.worked_hours), 0)), 2)                                         AS logistics_index,
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / (1.0 * SUM(c.demand_fulfilisent_hours)
+                        / NULLIF(SUM(c.demand_hours), 0)
+               * (1 - 1.0 * SUM(c.closed_hours_tianang)
+                   / NULLIF(SUM(c.operational_hours), 0))), 2)                               AS health_index
+FROM trash.is_de_at_city c
+WHERE (c.year = '2020' AND c.week > DATE_PART(w, GETDATE()) + 25)
+   OR (c.year = '2021' AND c.week < DATE_PART(w, GETDATE()))
+   OR (c.year = '2021' AND c.week = 53)
+GROUP BY 1, 2, 3, 4
+ORDER BY 1, 4;
+
+--country monthly
+SELECT c.country                                                              AS country,
+       c.year::VARCHAR + '-' + RIGHT('00' + CONVERT(NVARCHAR(2), c.month), 2) AS month,
+
+       --orders
+       SUM(c.actual_orders)                                                   AS delivered_orders,
+       SUM(c.potential_orders_tianang)                                        AS potential_orders,
+       SUM(c.weekly_forecast)                                                 AS weekly_forecast,
+       SUM(c.monthly_forecast)                                                AS monthly_forecast,
+
+       --restaurants
+       ROUND(1.0 * SUM(c.online_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_online_restaurants,
+       ROUND(1.0 * SUM(c.temp_off_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_temp_off_restaurants,
+       ROUND(1.0 * SUM(c.active_restaurants_monthly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS active_restaurants,
+
+       --drivers
+       ROUND(1.0 * SUM(c.contracted_drivers)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_contracted_drivers,
+       SUM(c.new_drivers)                                                     AS new_drivers,
+       SUM(c.churned_drivers)                                                 AS churned_drivers,
+       ROUND(SUM(c.total_active_months_churned_drivers)
+                 / NULLIF(SUM(c.churned_drivers), 0), 1)                      AS retention_months_churned_drivers,
+       ROUND(1.0 * SUM(c.active_drivers_monthly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS active_drivers,
+
+       --service level
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                        AS delivery_time,
+       ROUND(1.0 * SUM(c.in_bag_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                        AS in_bag_time,
+       ROUND(1.0 * SUM(c.order_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                        AS order_dist,
+       ROUND(1.0 * SUM(c.delivery_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                        AS delivery_dist,
+       ROUND(1.0 * SUM(c.closed_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                    AS closed_time_rate,
+       --ROUND(1.0 * SUM(c.closed_hours)
+       --          / NULLIF(SUM(c.operational_hours), 0), 3)                    AS closed_time_rate_new,
+       ROUND(1.0 * SUM(c.ranked_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                    AS ranked_time_rate,
+       ROUND(1.0 * SUM(c.canceled_orders)
+                 / NULLIF(SUM(c.canceled_orders + c.actual_orders), 0), 3)    AS canceled_orders_rate,
+
+       ROUND(1.0 * SUM(c.lost_orders_tianang)
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                       AS lost_order_rate,
+       ROUND(1.0 * SUM(c.achieved_sla1)
+                 / NULLIF(SUM(c.achieved_sla1 + c.not_achieved_sla1), 0), 3)  AS achieved_sla1_rate,
+       ROUND(1.0 * SUM(c.achieved_sla2)
+                 / NULLIF(SUM(c.achieved_sla2 + c.not_achieved_sla2), 0), 3)  AS achieved_sla2_rate,
+       ROUND(1.0 * SUM(c.achieved_sla3)
+                 / NULLIF(SUM(c.achieved_sla3 + c.not_achieved_sla3), 0), 3)  AS achieved_sla3_rate,
+       ROUND(1.0 * SUM(c.achieved_sla4)
+                 / NULLIF(SUM(c.achieved_sla4 + c.not_achieved_sla4), 0), 3)  AS achieved_sla4_rate,
+
+       --planning performance
+       ROUND(1.0 * SUM(c.actual_orders)
+                 / NULLIF(SUM(c.worked_hours), 0), 2)                         AS efficiency,
+       ROUND(1.0 * SUM(c.idle_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                 AS idle_time_rate,
+       ROUND(1.0 * SUM(c.pause_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                 AS pause_time_rate,
+       ROUND(1.0 * SUM(c.pooljob_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 3)                        AS pooljob_rate,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast_global)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                       AS forecast_inaccuracy_rate_global,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                       AS forecast_inaccuracy_rate_local,
+
+
+       --staffing performance
+       ROUND(1.0 * SUM(c.demand_fulfilisent_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                         AS demand_fulfilisent_rate,
+       ROUND(1.0 * SUM(c.overstaffing_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                         AS overstaffing_rate,
+       ROUND(1.0 * SUM(c.min_hours_fulfilled_monthly)
+                 / NULLIF(SUM(c.real_min_hours_monthly), 0), 3)               AS min_hour_compliance_rate,
+       ROUND(1.0 * SUM(c.drivers_min_hours_compliant_monthly)
+                 / NULLIF(SUM(c.drivers_total_monthly), 0), 3)                AS driver_min_hour_compliance_rate,
+
+       --driver hours
+       ROUND(1.0 * SUM(c.real_min_hours_monthly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS min_hours,
+       ROUND(SUM(c.available_hours), 0)                                       AS available_hours,
+       ROUND(SUM(c.demand_hours), 0)                                          AS demand_hours,
+       ROUND(SUM(c.planned_hours), 0)                                         AS planned_hours,
+       ROUND(SUM(c.worked_hours), 0)                                          AS worked_hours,
+       NULL                                                                   AS open_shift_hours,
+
+       --shift absences
+       ROUND(1.0 * SUM(c.paid_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS paid_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_excused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS unpaid_excused_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_unexcused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS unpaid_unexcused_absence_rate,
+
+       --approved absence requests
+       ROUND(1.0 * SUM(c.drivers_sick)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_drivers_sick,
+       ROUND(1.0 * SUM(c.drivers_vacation)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_drivers_vacation,
+       ROUND(1.0 * SUM(c.drivers_vacation_unpaid)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_drivers_vacation_unpaid,
+
+       --vehicle type
+       ROUND(1.0 * SUM(c.ebike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS ebike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.swapfiet_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS swapfiet_driver_hours_rate,
+       ROUND(1.0 * SUM(c.bike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS bike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.car_scooter_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS car_scooter_driver_hours_rate,
+
+       --indizes
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / (1.0 * SUM(c.actual_orders)
+               / NULLIF(SUM(c.worked_hours), 0)), 2)                          AS logistics_index,
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / (1.0 * SUM(c.demand_fulfilisent_hours)
+                        / NULLIF(SUM(c.demand_hours), 0)
+               * (1 - 1.0 * SUM(c.closed_hours_tianang)
+                   / NULLIF(SUM(c.operational_hours), 0))), 2)                AS health_index
+FROM trash.is_de_at_city c
+WHERE c.year <= 2020 --(c.year = '2020' AND c.month > DATE_PART(mon, GETDATE()) + 5)
+   OR (c.year = '2021' AND c.month < DATE_PART(mon, GETDATE()))
+GROUP BY 1, 2
+ORDER BY 1, 2;
+
+--city monthly
+SELECT c.city                                                                 AS city,
+       c.region                                                               AS region,
+       c.category                                                             AS category,
+       c.year::VARCHAR + '-' + RIGHT('00' + CONVERT(NVARCHAR(2), c.month), 2) AS month,
+
+       --orders
+       SUM(c.actual_orders)                                                   AS delivered_orders,
+       SUM(c.potential_orders_tianang)                                        AS potential_orders,
+       SUM(c.weekly_forecast)                                                 AS weekly_forecast,
+       SUM(c.monthly_forecast)                                                AS monthly_forecast,
+
+       --restaurants
+       ROUND(1.0 * SUM(c.online_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_online_restaurants,
+       ROUND(1.0 * SUM(c.temp_off_restaurants)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_temp_off_restaurants,
+       ROUND(1.0 * SUM(c.active_restaurants_monthly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS active_restaurants,
+
+       --drivers
+       ROUND(1.0 * SUM(c.contracted_drivers)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_contracted_drivers,
+       SUM(c.new_drivers)                                                     AS new_drivers,
+       SUM(c.churned_drivers)                                                 AS churned_drivers,
+       ROUND(SUM(c.total_active_months_churned_drivers)
+                 / NULLIF(SUM(c.churned_drivers), 0), 1)                      AS retention_months_churned_drivers,
+       ROUND(1.0 * SUM(c.active_drivers_monthly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS active_drivers,
+
+       --service level
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                        AS delivery_time,
+       ROUND(1.0 * SUM(c.in_bag_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 1)                        AS in_bag_time,
+       ROUND(1.0 * SUM(c.order_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                        AS order_dist,
+       ROUND(1.0 * SUM(c.delivery_dist * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 0)                        AS delivery_dist,
+       ROUND(1.0 * SUM(c.closed_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                    AS closed_time_rate,
+       --ROUND(1.0 * SUM(c.closed_hours)
+       --          / NULLIF(SUM(c.operational_hours), 0), 3)                    AS closed_time_rate_new,
+       ROUND(1.0 * SUM(c.ranked_hours_tianang)
+                 / NULLIF(SUM(c.operational_hours), 0), 3)                    AS ranked_time_rate,
+       ROUND(1.0 * SUM(c.canceled_orders)
+                 / NULLIF(SUM(c.canceled_orders + c.actual_orders), 0), 3)    AS canceled_orders_rate,
+
+       ROUND(1.0 * SUM(c.lost_orders_tianang)
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                       AS lost_order_rate,
+       ROUND(1.0 * SUM(c.achieved_sla1)
+                 / NULLIF(SUM(c.achieved_sla1 + c.not_achieved_sla1), 0), 3)  AS achieved_sla1_rate,
+       ROUND(1.0 * SUM(c.achieved_sla2)
+                 / NULLIF(SUM(c.achieved_sla2 + c.not_achieved_sla2), 0), 3)  AS achieved_sla2_rate,
+       ROUND(1.0 * SUM(c.achieved_sla3)
+                 / NULLIF(SUM(c.achieved_sla3 + c.not_achieved_sla3), 0), 3)  AS achieved_sla3_rate,
+       ROUND(1.0 * SUM(c.achieved_sla4)
+                 / NULLIF(SUM(c.achieved_sla4 + c.not_achieved_sla4), 0), 3)  AS achieved_sla4_rate,
+
+       --planning performance
+       ROUND(1.0 * SUM(c.actual_orders)
+                 / NULLIF(SUM(c.worked_hours), 0), 2)                         AS efficiency,
+       ROUND(1.0 * SUM(c.idle_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                 AS idle_time_rate,
+       ROUND(1.0 * SUM(c.pause_hours_tianang)
+                 / NULLIF(SUM(c.worked_hours_tianang), 0), 3)                 AS pause_time_rate,
+       ROUND(1.0 * SUM(c.pooljob_orders)
+                 / NULLIF(SUM(c.actual_orders), 0), 3)                        AS pooljob_rate,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast_global)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                       AS forecast_inaccuracy_rate_global,
+       ROUND(1.0 * SUM(1.0 * c.orders_tianang * ABS(c.potential_orders_tianang - c.weekly_forecast)
+           / NULLIF(c.potential_orders_tianang, 0))
+                 / NULLIF(SUM(c.orders_tianang), 0), 3)                       AS forecast_inaccuracy_rate_local,
+
+
+       --staffing performance
+       ROUND(1.0 * SUM(c.demand_fulfilisent_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                         AS demand_fulfilisent_rate,
+       ROUND(1.0 * SUM(c.overstaffing_hours)
+                 / NULLIF(SUM(c.demand_hours), 0), 3)                         AS overstaffing_rate,
+       ROUND(1.0 * SUM(c.min_hours_fulfilled_monthly)
+                 / NULLIF(SUM(c.real_min_hours_monthly), 0), 3)               AS min_hour_compliance_rate,
+       ROUND(1.0 * SUM(c.drivers_min_hours_compliant_monthly)
+                 / NULLIF(SUM(c.drivers_total_monthly), 0), 3)                AS driver_min_hour_compliance_rate,
+
+       --driver hours
+       ROUND(1.0 * SUM(c.real_min_hours_monthly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS min_hours,
+       ROUND(SUM(c.available_hours), 0)                                       AS available_hours,
+       ROUND(SUM(c.demand_hours), 0)                                          AS demand_hours,
+       ROUND(SUM(c.planned_hours), 0)                                         AS planned_hours,
+       ROUND(SUM(c.worked_hours), 0)                                          AS worked_hours,
+       NULL                                                                   AS open_shift_hours,
+
+       --shift absences
+       ROUND(1.0 * SUM(c.paid_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS paid_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_excused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS unpaid_excused_absence_rate,
+       ROUND(1.0 * SUM(c.unpaid_unexcused_absence_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS unpaid_unexcused_absence_rate,
+
+       --approved absence requests
+       ROUND(1.0 * SUM(c.drivers_sick)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_drivers_sick,
+       ROUND(1.0 * SUM(c.drivers_vacation)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_drivers_vacation,
+       ROUND(1.0 * SUM(c.drivers_vacation_unpaid)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_drivers_vacation_unpaid,
+
+       --vehicle type
+       ROUND(1.0 * SUM(c.ebike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS ebike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.swapfiet_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS swapfiet_driver_hours_rate,
+       ROUND(1.0 * SUM(c.bike_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS bike_driver_hours_rate,
+       ROUND(1.0 * SUM(c.car_scooter_driver_hours)
+                 / NULLIF(SUM(c.planned_hours), 0), 3)                        AS car_scooter_driver_hours_rate,
+
+       --indizes
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / (1.0 * SUM(c.actual_orders)
+               / NULLIF(SUM(c.worked_hours), 0)), 2)                          AS logistics_index,
+       ROUND(1.0 * SUM(c.delivery_time * c.actual_orders)
+                 / NULLIF(SUM(c.actual_orders), 0)
+                 / (1.0 * SUM(c.demand_fulfilisent_hours)
+                        / NULLIF(SUM(c.demand_hours), 0)
+               * (1 - 1.0 * SUM(c.closed_hours_tianang)
+                   / NULLIF(SUM(c.operational_hours), 0))), 2)                AS health_index
+FROM trash.is_de_at_city c
+WHERE c.year <= 2020 --(c.year = '2020' AND c.month > DATE_PART(mon, GETDATE()) + 5)
+   OR (c.year = '2021' AND c.month < DATE_PART(mon, GETDATE()))
+GROUP BY 1, 2, 3, 4
+ORDER BY 1, 4;
+
+--city monthly hiring targets
+SELECT c.city                                                                 AS city,
+       c.region                                                               AS region,
+       c.year::VARCHAR + '-' + RIGHT('00' + CONVERT(NVARCHAR(2), c.month), 2) AS month,
+
+       --orders
+       SUM(c.actual_orders)                                                   AS delivered_orders,
+
+       --drivers
+       ROUND(1.0 * SUM(c.contracted_drivers)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_contracted_drivers,
+       SUM(c.churned_drivers)                                                 AS churned_drivers,
+
+       --approved absence requests
+       ROUND(1.0 * SUM(c.drivers_sick + c.drivers_vacation + drivers_vacation_unpaid)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS avg_drivers_away,
+
+       --driver hours
+       ROUND(1.0 * SUM(c.real_min_hours_monthly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS min_hours,
+       ROUND(1.0 * SUM(c.contractual_min_hours_monthly)
+                 / (DATEDIFF(d, MIN(c.date), MAX(c.date)) + 1), 0)            AS contracted_hours,
+       ROUND(SUM(c.worked_hours), 0)                                          AS worked_hours
+FROM trash.is_de_at_city c
+WHERE c.year = 2020 --(c.year = '2020' AND c.month > DATE_PART(mon, GETDATE()) + 5)
+   OR (c.year = '2021' AND c.month < DATE_PART(mon, GETDATE()))
+GROUP BY 1, 2, 3
+ORDER BY 1, 3;
+
+select * from trash.is_de_at_city order by 1,2,3,4,5 limit 100
+
+
